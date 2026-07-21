@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CreditFlow/CreditFlow.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CreditFlow.Tests/CreditFlow.Tests.csproj" />
+  </Folder>
+</Solution>
