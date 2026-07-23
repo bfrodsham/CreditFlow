@@ -115,10 +115,6 @@ if (app.Environment.IsDevelopment())
         {
             return Results.BadRequest(new { error = ex.Message });
         }
-        catch (InvalidOperationException)
-        {
-            return Results.NotFound();
-        }
     });
 }
 
