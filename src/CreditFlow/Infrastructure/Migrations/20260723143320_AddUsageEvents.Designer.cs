@@ -3,6 +3,7 @@ using System;
 using CreditFlow.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CreditFlow.Infrastructure.Migrations
 {
     [DbContext(typeof(CreditFlowDbContext))]
-    partial class CreditFlowDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260723143320_AddUsageEvents")]
+    partial class AddUsageEvents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.0");
