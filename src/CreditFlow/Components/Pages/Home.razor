@@ -3,6 +3,7 @@
 @using CreditFlow.Application
 @using CreditFlow.Contracts
 @inject AccountQueryService QueryService
+@inject NavigationManager Navigation
 
 <PageTitle>Dashboard</PageTitle>
 
@@ -47,6 +48,17 @@ else
 					<p class="display-6 mb-0">@_balance credits</p>
 				}
 			</div>
+
+			<div class="d-flex flex-column gap-2 align-items-start">
+				<button class="btn btn-primary" @onclick="SimulateUsageEventAsync" disabled="@(_selectedAccountId is null || _isSubmittingUsage)">
+					@(_isSubmittingUsage ? "Simulating usage..." : "Simulate Usage Event")
+				</button>
+
+				@if (!string.IsNullOrWhiteSpace(_usageMessage))
+				{
+					<p class="mb-0">@_usageMessage</p>
+				}
+			</div>
 		</div>
 	</div>
 }
@@ -57,7 +69,9 @@ else
 	private int? _balance;
 	private bool _isLoading = true;
 	private bool _isLoadingBalance;
+	private bool _isSubmittingUsage;
 	private string? _error;
+	private string? _usageMessage;
 
 	protected override async Task OnInitializedAsync()
 	{
@@ -89,6 +103,7 @@ else
 		}
 
 		_selectedAccountId = accountId;
+		_usageMessage = null;
 		await LoadBalanceAsync(accountId);
 	}
 
@@ -110,6 +125,45 @@ else
 		finally
 		{
 			_isLoadingBalance = false;
+		}
+	}
+
+	private async Task SimulateUsageEventAsync()
+	{
+		if (_selectedAccountId is null)
+		{
+			return;
+		}
+
+		_isSubmittingUsage = true;
+		_error = null;
+		_usageMessage = null;
+
+		try
+		{
+			using var httpClient = new HttpClient { BaseAddress = new Uri(Navigation.BaseUri) };
+			var response = await httpClient.PostAsJsonAsync("/api/simulate/usage-event", new SimulateUsageEventRequestDto(_selectedAccountId.Value, "model-inference", null));
+
+			if (!response.IsSuccessStatusCode)
+			{
+				_error = "Unable to simulate usage for the selected account.";
+				return;
+			}
+
+			var result = await response.Content.ReadFromJsonAsync<UsageEventResultDto>();
+			_usageMessage = result is null
+				? "Usage event recorded."
+				: $"Recorded {result.EventType} usage for {result.CreditCost} credits.";
+
+			await LoadBalanceAsync(_selectedAccountId.Value);
+		}
+		catch
+		{
+			_error = "Unable to simulate usage for the selected account.";
+		}
+		finally
+		{
+			_isSubmittingUsage = false;
 		}
 	}
 }
