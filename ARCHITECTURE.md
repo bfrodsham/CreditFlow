@@ -7,14 +7,16 @@ A SaaS usage-credits platform built to demonstrate clean architecture, financial
 ## 1. Solution Structure
 
 ```
-CreditFlow.Domain          → Entities, enums, pure domain logic (no dependencies)
-CreditFlow.Application     → Services, DTOs, interfaces, validation
-CreditFlow.Infrastructure  → EF Core, repositories, webhook handling, background jobs
-CreditFlow.Web             → Blazor Server UI + minimal API endpoints
-CreditFlow.Tests           → xUnit — Domain + Application coverage
+src/CreditFlow             → Single ASP.NET Core + Blazor Server project
+	/Domain                  → Entities + enums
+	/Application             → Services + query/read logic
+	/Infrastructure          → EF Core DbContext, migrations, seed data
+	/Components              → Blazor UI
+tests/CreditFlow.Tests     → xUnit tests
 ```
 
-Dependencies flow inward: `Web` → `Infrastructure` → `Application` → `Domain`. `Domain` has no outward dependencies, which keeps core business rules testable in isolation from EF Core, HTTP, or any framework concern.
+The original plan described separate projects (`Domain`, `Application`, `Infrastructure`, `Web`).
+Current implementation keeps those boundaries as folders inside one project. This is an intentional simplification for early slices, while preserving the same conceptual architecture.
 
 ---
 
@@ -23,22 +25,36 @@ Dependencies flow inward: `Web` → `Infrastructure` → `Application` → `Doma
 ### Account
 Customer/organization. `Id`, `Name`, `Email`, `CreatedAt`.
 
+Status: implemented.
+
 ### Plan
 `Id`, `Name` (Free / Pro / Enterprise), `MonthlyCreditAllowance`, `AllowsRollover`, `PricePerExtraCredit`.
 
+Status: planned (Slice 5), not implemented yet.
+
 ### Subscription
 `Id`, `AccountId`, `PlanId`, `CurrentPeriodStart`, `CurrentPeriodEnd`, `Status`.
+
+Status: planned (Slice 5), not implemented yet.
 
 ### CreditLedgerEntry — the architectural core
 **Design decision:** balance is never stored as a mutable field. It is always derived by summing ledger entries for an account. This mirrors how real financial/billing systems work: every state change is an immutable, auditable fact, not an overwrite. It also eliminates a whole category of race-condition bugs that a `Balance` column invites.
 
 Fields: `Id`, `AccountId`, `Amount` (signed), `Type` (Grant / Consume / Expire / Rollover / Adjustment), `Source` (SubscriptionRenewal / CreditPackPurchase / UsageEvent / ManualAdjustment), `IdempotencyKey`, `ReferenceId`, `Description`, `CreatedAt`.
 
+Status: implemented.
+
+Note: `Type` and `Source` enums already include future-slice values. This was done early so later slices can build without enum churn.
+
 ### CreditPack
 One-time purchasable top-ups. `Id`, `Name`, `CreditAmount`, `Price`.
 
+Status: planned, not implemented yet.
+
 ### UsageEvent
 A simulated feature-use event that consumes credits. `Id`, `AccountId`, `EventType`, `CreditCost`, `IdempotencyKey`, `OccurredAt`.
+
+Status: planned (Slice 3), not implemented yet.
 
 ---
 
@@ -46,11 +62,13 @@ A simulated feature-use event that consumes credits. `Id`, `AccountId`, `EventTy
 
 | Service | Responsibility |
 |---|---|
-| `CreditLedgerService.GetBalance(accountId)` | Sums all ledger entries — single source of truth for balance |
-| `BillingWebhookService.ProcessPaymentEvent(payload, signature)` | Validates HMAC signature, checks idempotency key, grants credits |
-| `UsageService.RecordUsageEvent(accountId, eventType, idempotencyKey)` | Checks balance, atomically debits credits, throws on insufficient balance |
-| `PlanRenewalJob : BackgroundService` | On a timer: expires non-rollover leftover credits, grants the next period's allowance |
-| `PlanService` | Plan lookup, upgrade/downgrade logic |
+| `CreditLedgerService.GetBalance(accountId)` | Implemented as pure in-memory ledger summation for core balance rules and tests |
+| `AccountQueryService.GetAccountsAsync()` | Implemented read query for account dropdown data |
+| `AccountQueryService.GetBalanceAsync(accountId)` | Implemented EF-backed read query used by API/UI |
+| `BillingWebhookService.ProcessPaymentEvent(payload, signature)` | Planned (Slice 4) |
+| `UsageService.RecordUsageEvent(accountId, eventType, idempotencyKey)` | Planned (Slice 3) |
+| `PlanRenewalJob : BackgroundService` | Planned (Slice 5) |
+| `PlanService` | Planned (Slice 5) |
 
 **Idempotency pattern:** every entry point that writes a ledger entry (webhook, usage event) first checks whether an entry with the same `IdempotencyKey` already exists for that account, and short-circuits to the existing result if so. This guards against duplicate webhook delivery and retried requests double-crediting or double-charging — a correctness requirement in any real billing system, not an edge case.
 
@@ -61,18 +79,20 @@ A simulated feature-use event that consumes credits. `Id`, `AccountId`, `EventTy
 ## 4. API Surface
 
 ```
-POST   /api/webhooks/billing              → inbound payment event, HMAC-signed, idempotent
-GET    /api/accounts/{id}/balance
-GET    /api/accounts/{id}/ledger          → paginated transaction history
-POST   /api/accounts/{id}/usage-events    → simulate a credit-consuming action
-GET    /api/plans
-POST   /api/accounts/{id}/plan            → upgrade/downgrade
-GET    /api/accounts/{id}/subscription
-POST   /api/simulate/payment-webhook      → dev-only: fires a fake signed webhook for demo purposes
-POST   /api/simulate/usage-event          → dev-only: fires a fake usage event for demo purposes
+GET    /api/accounts                       → implemented (added to support dashboard account switcher)
+GET    /api/accounts/{id}/balance         → implemented
+
+POST   /api/webhooks/billing              → planned (Slice 4)
+GET    /api/accounts/{id}/ledger          → planned (Slice 6)
+POST   /api/accounts/{id}/usage-events    → planned (Slice 3)
+GET    /api/plans                         → planned (Slice 5)
+POST   /api/accounts/{id}/plan            → planned (Slice 5)
+GET    /api/accounts/{id}/subscription    → planned (Slice 5)
+POST   /api/simulate/payment-webhook      → planned (Slice 4)
+POST   /api/simulate/usage-event          → planned (Slice 3)
 ```
 
-The `/api/simulate/*` endpoints exist because a live demo can't easily fire a real signed webhook — they make the whole earn/consume/expire flow visible and clickable from the UI.
+The `/api/simulate/*` endpoints are still planned. Their purpose remains unchanged: make signed-webhook and usage flows demoable without external systems.
 
 ---
 
@@ -83,6 +103,10 @@ Blazor Server, single project, no separate frontend stack:
 - **Usage History** — paginated, filterable ledger table
 - **Plans** — current plan, upgrade/downgrade, credit pack purchase
 - **Admin/Demo** — simulate-webhook and simulate-usage-event controls
+
+Current implementation status:
+- **Dashboard** is implemented with account switcher + balance display.
+- **Usage History**, **Plans**, and **Admin/Demo** pages are planned and not implemented yet.
 
 Auth is a lightweight account-switcher for demo purposes, not full identity — a deliberate scope decision, not an oversight.
 
@@ -110,6 +134,10 @@ xUnit, focused on `Domain` and `Application` logic rather than framework plumbin
 - Duplicate idempotency key handling (webhook and usage event paths)
 - Insufficient-credit rejection
 - Renewal job correctness (expiration vs. rollover)
+
+Current implementation status:
+- Implemented now: balance-calculation tests.
+- Planned for later slices: idempotency, insufficient-credit, and renewal tests.
 
 ---
 
