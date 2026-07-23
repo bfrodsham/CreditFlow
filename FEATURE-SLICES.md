@@ -6,6 +6,32 @@ For each slice: create the branch yourself first, then run the agent prompt in *
 
 ---
 
+## Current Implementation Snapshot (as of 2026-07-23)
+
+This file started as a forward-looking plan. The codebase now includes a few practical additions made during Slice 2 work that were not explicitly listed in the original slice scopes.
+
+### Confirmed complete
+- Slice 1 is complete.
+- Slice 2 core scope is complete (Account + Ledger entities, SQLite + migration + seeding, startup migration apply, derived balance API, dashboard account switcher + balance display, and balance tests).
+- Slice 3 core scope is complete (UsageEvent write flow, idempotency behavior, usage endpoints, dashboard simulation action, and usage service tests).
+
+### Added earlier than originally planned
+- `GET /api/accounts` exists to support the Dashboard account dropdown.
+- `AccountQueryService.GetAccountsAsync()` and `AccountQueryService.GetBalanceAsync()` were introduced as read-model query methods for the UI/API read path.
+- `CreditLedgerEntryType` already includes `Expire`, `Rollover`, and `Adjustment` values, and `CreditLedgerEntrySource` includes all planned source values.
+- Seed data already includes an `Adjustment` entry.
+- Balance tests already exercise future ledger types (`Expire`, `Rollover`, `Adjustment`) in addition to `Grant` and `Consume`.
+
+### Not implemented yet
+- Slice 4: webhook signature/idempotency flow and webhook simulation path.
+- Slice 5: plans/subscriptions entities + renewal job + related endpoints/UI.
+- Slice 6: ledger history endpoint + history page + pagination/filter tests.
+
+### Scope note for upcoming slices
+- The early enum values and seed-data adjustment entry are foundation work only; they do not count as completion of Slices 4-6.
+
+---
+
 ## Slice 1 — Walking Skeleton *(reference — already complete)*
 
 **Goal:** Prove the entire path from code to a running, deployed app before any business logic exists.

@@ -12,6 +12,7 @@ public class CreditFlowDbContext : DbContext
 
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<CreditLedgerEntry> CreditLedgerEntries => Set<CreditLedgerEntry>();
+    public DbSet<UsageEvent> UsageEvents => Set<UsageEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,6 +50,24 @@ public class CreditFlowDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasData(CreditFlowSeedData.LedgerEntries());
+        });
+
+        modelBuilder.Entity<UsageEvent>(entity =>
+        {
+            entity.ToTable("UsageEvents");
+            entity.HasKey(usageEvent => usageEvent.Id);
+            entity.Property(usageEvent => usageEvent.EventType).IsRequired().HasMaxLength(100);
+            entity.Property(usageEvent => usageEvent.CreditCost).IsRequired();
+            entity.Property(usageEvent => usageEvent.IdempotencyKey).IsRequired().HasMaxLength(200);
+            entity.Property(usageEvent => usageEvent.OccurredAt).IsRequired();
+
+            entity.HasIndex(usageEvent => usageEvent.AccountId);
+            entity.HasIndex(usageEvent => new { usageEvent.AccountId, usageEvent.IdempotencyKey }).IsUnique();
+
+            entity.HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(usageEvent => usageEvent.AccountId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
