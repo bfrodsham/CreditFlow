@@ -22,7 +22,15 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<CreditFlowDbContext>();
-    dbContext.Database.Migrate();
+    try
+    {
+        await dbContext.Database.MigrateAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Failed to apply database migrations at startup.");
+        throw;
+    }
 }
 
 app.MapGet("/api/accounts", async (AccountQueryService queryService) =>

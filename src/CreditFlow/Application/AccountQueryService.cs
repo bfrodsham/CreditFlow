@@ -23,17 +23,13 @@ public class AccountQueryService
 
     public async Task<AccountBalanceDto?> GetBalanceAsync(Guid accountId)
     {
-        var exists = await _dbContext.Accounts.AnyAsync(account => account.Id == accountId);
-        if (!exists)
-        {
-            return null;
-        }
-
-        var entries = await _dbContext.CreditLedgerEntries
-            .Where(entry => entry.AccountId == accountId)
-            .ToListAsync();
-
-        var balance = new CreditLedgerService(entries).GetBalance(accountId);
-        return new AccountBalanceDto(accountId, balance);
+        return await _dbContext.Accounts
+            .Where(account => account.Id == accountId)
+            .Select(account => new AccountBalanceDto(
+                account.Id,
+                _dbContext.CreditLedgerEntries
+                    .Where(entry => entry.AccountId == account.Id)
+                    .Sum(entry => (int?)entry.Amount) ?? 0))
+            .SingleOrDefaultAsync();
     }
 }
