@@ -1,0 +1,205 @@
+@page "/admin-demo"
+@rendermode InteractiveServer
+@using CreditFlow.Components.Services
+@using CreditFlow.Contracts
+@inject DashboardApiClient DashboardApi
+
+<PageTitle>Admin Demo</PageTitle>
+
+<h1>Admin/Demo</h1>
+
+@if (_isLoading)
+{
+    <p>Loading accounts...</p>
+}
+else if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger" role="alert">
+        @_error
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="card-body d-flex flex-column gap-3">
+            <div>
+                <label class="form-label" for="accountSelector">Account</label>
+                <select class="form-select" id="accountSelector" value="@_selectedAccountId" @onchange="OnAccountChanged">
+                    @foreach (var account in _accounts)
+                    {
+                        <option value="@account.Id">@account.Name (@account.Email)</option>
+                    }
+                </select>
+            </div>
+
+            <div>
+                <h2 class="h5 mb-1">Current Balance</h2>
+                @if (_isLoadingBalance)
+                {
+                    <p class="mb-0">Loading balance...</p>
+                }
+                else if (_balance is null)
+                {
+                    <p class="mb-0">Select an account to view balance.</p>
+                }
+                else
+                {
+                    <p class="display-6 mb-0">@_balance credits</p>
+                }
+            </div>
+
+            <div class="d-flex flex-column gap-2 align-items-start">
+                <button class="btn btn-primary" @onclick="SimulateUsageEventAsync" disabled="@(_selectedAccountId is null || _isSimulatingUsage)">
+                    @(_isSimulatingUsage ? "Simulating usage..." : "Simulate Usage Event")
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(_usageMessage))
+                {
+                    <p class="mb-0">@_usageMessage</p>
+                }
+            </div>
+
+            <div class="d-flex flex-column gap-2 align-items-start">
+                <button class="btn btn-warning" @onclick="SimulatePaymentWebhookAsync" disabled="@(_selectedAccountId is null || _isSubmitting)">
+                    @(_isSubmitting ? "Simulating payment webhook..." : "Simulate Payment Webhook")
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(_webhookMessage))
+                {
+                    <p class="mb-0">@_webhookMessage</p>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<AccountSummaryDto> _accounts = [];
+    private Guid? _selectedAccountId;
+    private int? _balance;
+    private bool _isLoading = true;
+    private bool _isLoadingBalance;
+    private bool _isSimulatingUsage;
+    private bool _isSubmitting;
+    private string? _error;
+    private string? _usageMessage;
+    private string? _webhookMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _accounts = await DashboardApi.GetAccountsAsync();
+            _selectedAccountId = _accounts.FirstOrDefault()?.Id;
+
+            if (_selectedAccountId is not null)
+            {
+                await LoadBalanceAsync(_selectedAccountId.Value);
+            }
+        }
+        catch
+        {
+            _error = "Unable to load account data.";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task OnAccountChanged(ChangeEventArgs args)
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out var accountId))
+        {
+            return;
+        }
+
+        _selectedAccountId = accountId;
+        _usageMessage = null;
+        _webhookMessage = null;
+        await LoadBalanceAsync(accountId);
+    }
+
+    private async Task LoadBalanceAsync(Guid accountId)
+    {
+        _isLoadingBalance = true;
+        _error = null;
+
+        try
+        {
+            var response = await DashboardApi.GetBalanceAsync(accountId);
+            _balance = response?.Balance;
+        }
+        catch
+        {
+            _error = "Unable to load balance for the selected account.";
+            _balance = null;
+        }
+        finally
+        {
+            _isLoadingBalance = false;
+        }
+    }
+
+    private async Task SimulatePaymentWebhookAsync()
+    {
+        if (_selectedAccountId is null)
+        {
+            return;
+        }
+
+        _isSubmitting = true;
+        _error = null;
+        _webhookMessage = null;
+
+        try
+        {
+            var result = await DashboardApi.SimulatePaymentWebhookAsync(_selectedAccountId.Value, 100, null, "Simulated webhook grant", CancellationToken.None);
+            _webhookMessage = result is null
+                ? "Payment webhook processed."
+                : result.AlreadyProcessed
+                    ? "Payment webhook already processed for this idempotency key."
+                    : $"Granted {result.CreditsGranted} credits from simulated webhook.";
+
+            await LoadBalanceAsync(_selectedAccountId.Value);
+        }
+        catch
+        {
+            _error = "Unable to simulate payment webhook for the selected account.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private async Task SimulateUsageEventAsync()
+    {
+        if (_selectedAccountId is null)
+        {
+            return;
+        }
+
+        _isSimulatingUsage = true;
+        _error = null;
+        _usageMessage = null;
+
+        try
+        {
+            var result = await DashboardApi.SimulateUsageEventAsync(_selectedAccountId.Value, "model-inference", null);
+            _usageMessage = result is null
+                ? "Usage event recorded."
+                : $"Recorded {result.EventType} usage for {result.CreditCost} credits.";
+
+            await LoadBalanceAsync(_selectedAccountId.Value);
+        }
+        catch
+        {
+            _error = "Unable to simulate usage for the selected account.";
+        }
+        finally
+        {
+            _isSimulatingUsage = false;
+        }
+    }
+}
