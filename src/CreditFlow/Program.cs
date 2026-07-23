@@ -4,6 +4,8 @@ using CreditFlow.Components.Services;
 using CreditFlow.Contracts;
 using CreditFlow.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,12 +14,14 @@ var connectionString = builder.Configuration.GetConnectionString("CreditFlowDb")
 
 builder.Services.AddDbContext<CreditFlowDbContext>(options =>
     options.UseSqlite(connectionString));
+builder.Services.Configure<BillingWebhookOptions>(builder.Configuration.GetSection(BillingWebhookOptions.SectionName));
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddScoped<AccountQueryService>();
 builder.Services.AddScoped<UsageService>();
+builder.Services.AddScoped<BillingWebhookService>();
 builder.Services.AddHttpClient<DashboardApiClient>();
 
 var app = builder.Build();
@@ -88,6 +92,41 @@ app.MapPost("/api/accounts/{id:guid}/usage-events", async (Guid id, UsageEventRe
     }
 });
 
+app.MapPost("/api/webhooks/billing", async (HttpRequest request, BillingWebhookService billingWebhookService, CancellationToken cancellationToken) =>
+{
+    string payload;
+    using (var reader = new StreamReader(request.Body))
+    {
+        payload = await reader.ReadToEndAsync(cancellationToken);
+    }
+
+    var signature = request.Headers["X-CreditFlow-Signature"].FirstOrDefault() ?? string.Empty;
+
+    try
+    {
+        var result = await billingWebhookService.ProcessPaymentEvent(payload, signature, cancellationToken);
+        return Results.Ok(new PaymentWebhookResultDto(
+            result.AccountId,
+            result.CreditsGranted,
+            result.IdempotencyKey,
+            result.ReferenceId,
+            result.Balance,
+            result.AlreadyProcessed));
+    }
+    catch (InvalidWebhookSignatureException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+    catch (MalformedWebhookPayloadException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.MapPost("/api/simulate/usage-event", async (SimulateUsageEventRequestDto request, UsageService usageService, CancellationToken cancellationToken) =>
@@ -110,6 +149,48 @@ if (app.Environment.IsDevelopment())
         catch (InsufficientCreditsException ex)
         {
             return Results.BadRequest(new { error = ex.Message, availableCredits = ex.AvailableCredits, requiredCredits = ex.RequiredCredits });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+    });
+
+    app.MapPost("/api/simulate/payment-webhook", async (SimulatePaymentWebhookRequestDto request, BillingWebhookService billingWebhookService, IOptions<BillingWebhookOptions> options, CancellationToken cancellationToken) =>
+    {
+        if (request.AccountId == Guid.Empty)
+        {
+            return Results.BadRequest(new { error = "AccountId is required." });
+        }
+
+        var idempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? $"simulate-payment-{Guid.NewGuid():N}"
+            : request.IdempotencyKey;
+
+        var payloadDto = new PaymentWebhookPayloadDto(
+            request.AccountId,
+            request.Credits.GetValueOrDefault(100),
+            idempotencyKey,
+            $"simulated-payment-{Guid.NewGuid():N}",
+            string.IsNullOrWhiteSpace(request.Description) ? "Simulated payment webhook" : request.Description);
+
+        var payload = JsonSerializer.Serialize(payloadDto);
+        var signature = BillingWebhookService.CreateSignature(payload, options.Value.SigningSecret);
+
+        try
+        {
+            var result = await billingWebhookService.ProcessPaymentEvent(payload, signature, cancellationToken);
+            return Results.Ok(new PaymentWebhookResultDto(
+                result.AccountId,
+                result.CreditsGranted,
+                result.IdempotencyKey,
+                result.ReferenceId,
+                result.Balance,
+                result.AlreadyProcessed));
+        }
+        catch (MalformedWebhookPayloadException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
         }
         catch (ArgumentException ex)
         {
