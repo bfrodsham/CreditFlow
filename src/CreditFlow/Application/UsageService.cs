@@ -115,16 +115,19 @@ public class UsageService
     private async Task<UsageEventRecordResult?> TryGetExistingResultAsync(Guid accountId, string idempotencyKey, CancellationToken cancellationToken)
     {
         var existingLedgerEntry = await _dbContext.CreditLedgerEntries
-            .Where(entry =>
-                entry.AccountId == accountId &&
-                entry.IdempotencyKey == idempotencyKey &&
-                entry.Source == CreditLedgerEntrySource.UsageEvent &&
-                entry.Type == CreditLedgerEntryType.Consume)
+            .Where(entry => entry.AccountId == accountId && entry.IdempotencyKey == idempotencyKey)
             .SingleOrDefaultAsync(cancellationToken);
 
         if (existingLedgerEntry is null)
         {
             return null;
+        }
+
+        if (existingLedgerEntry.Source != CreditLedgerEntrySource.UsageEvent || existingLedgerEntry.Type != CreditLedgerEntryType.Consume)
+        {
+            throw new ArgumentException(
+                $"Idempotency key '{idempotencyKey}' is already in use for this account.",
+                nameof(idempotencyKey));
         }
 
         var existingUsageEvent = await _dbContext.UsageEvents
