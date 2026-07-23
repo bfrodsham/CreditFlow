@@ -54,7 +54,7 @@ Status: planned, not implemented yet.
 ### UsageEvent
 A simulated feature-use event that consumes credits. `Id`, `AccountId`, `EventType`, `CreditCost`, `IdempotencyKey`, `OccurredAt`.
 
-Status: planned (Slice 3), not implemented yet.
+Status: implemented (Slice 3).
 
 ---
 
@@ -66,7 +66,7 @@ Status: planned (Slice 3), not implemented yet.
 | `AccountQueryService.GetAccountsAsync()` | Implemented read query for account dropdown data |
 | `AccountQueryService.GetBalanceAsync(accountId)` | Implemented EF-backed read query used by API/UI |
 | `BillingWebhookService.ProcessPaymentEvent(payload, signature)` | Planned (Slice 4) |
-| `UsageService.RecordUsageEvent(accountId, eventType, idempotencyKey)` | Planned (Slice 3) |
+| `UsageService.RecordUsageEvent(accountId, eventType, idempotencyKey)` | Implemented (Slice 3) |
 | `PlanRenewalJob : BackgroundService` | Planned (Slice 5) |
 | `PlanService` | Planned (Slice 5) |
 
@@ -84,15 +84,15 @@ GET    /api/accounts/{id}/balance         → implemented
 
 POST   /api/webhooks/billing              → planned (Slice 4)
 GET    /api/accounts/{id}/ledger          → planned (Slice 6)
-POST   /api/accounts/{id}/usage-events    → planned (Slice 3)
+POST   /api/accounts/{id}/usage-events    → implemented
 GET    /api/plans                         → planned (Slice 5)
 POST   /api/accounts/{id}/plan            → planned (Slice 5)
 GET    /api/accounts/{id}/subscription    → planned (Slice 5)
 POST   /api/simulate/payment-webhook      → planned (Slice 4)
-POST   /api/simulate/usage-event          → planned (Slice 3)
+POST   /api/simulate/usage-event          → implemented (dev-only)
 ```
 
-The `/api/simulate/*` endpoints are still planned. Their purpose remains unchanged: make signed-webhook and usage flows demoable without external systems.
+The `/api/simulate/*` endpoints exist to make signed-webhook and usage flows demoable without external systems. Today, usage-event simulation is implemented and payment-webhook simulation remains planned.
 
 ---
 
@@ -105,7 +105,7 @@ Blazor Server, single project, no separate frontend stack:
 - **Admin/Demo** — simulate-webhook and simulate-usage-event controls
 
 Current implementation status:
-- **Dashboard** is implemented with account switcher + balance display.
+- **Dashboard** is implemented with account switcher, balance display, and simulate usage-event action.
 - **Usage History**, **Plans**, and **Admin/Demo** pages are planned and not implemented yet.
 
 Auth is a lightweight account-switcher for demo purposes, not full identity — a deliberate scope decision, not an oversight.
@@ -136,8 +136,8 @@ xUnit, focused on `Domain` and `Application` logic rather than framework plumbin
 - Renewal job correctness (expiration vs. rollover)
 
 Current implementation status:
-- Implemented now: balance-calculation tests.
-- Planned for later slices: idempotency, insufficient-credit, and renewal tests.
+- Implemented now: balance-calculation tests, plus usage-event debit/idempotency/insufficient-credit tests.
+- Planned for later slices: webhook and renewal tests.
 
 ---
 

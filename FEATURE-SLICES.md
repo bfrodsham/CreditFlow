@@ -13,6 +13,7 @@ This file started as a forward-looking plan. The codebase now includes a few pra
 ### Confirmed complete
 - Slice 1 is complete.
 - Slice 2 core scope is complete (Account + Ledger entities, SQLite + migration + seeding, startup migration apply, derived balance API, dashboard account switcher + balance display, and balance tests).
+- Slice 3 core scope is complete (UsageEvent write flow, idempotency behavior, usage endpoints, dashboard simulation action, and usage service tests).
 
 ### Added earlier than originally planned
 - `GET /api/accounts` exists to support the Dashboard account dropdown.
@@ -22,7 +23,6 @@ This file started as a forward-looking plan. The codebase now includes a few pra
 - Balance tests already exercise future ledger types (`Expire`, `Rollover`, `Adjustment`) in addition to `Grant` and `Consume`.
 
 ### Not implemented yet
-- Slice 3: usage-event write flow, idempotency handling endpoint behavior, and simulate usage endpoint.
 - Slice 4: webhook signature/idempotency flow and webhook simulation path.
 - Slice 5: plans/subscriptions entities + renewal job + related endpoints/UI.
 - Slice 6: ledger history endpoint + history page + pagination/filter tests.
