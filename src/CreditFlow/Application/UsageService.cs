@@ -1,3 +1,4 @@
+using System.Data;
 using CreditFlow.Domain;
 using CreditFlow.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -34,7 +35,7 @@ public class UsageService
         var normalizedEventType = eventType.Trim();
         var creditCost = ResolveCreditCost(normalizedEventType);
 
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var accountExists = await _dbContext.Accounts
             .AnyAsync(account => account.Id == accountId, cancellationToken);
@@ -51,11 +52,7 @@ public class UsageService
             return existingResult;
         }
 
-        var accountEntries = await _dbContext.CreditLedgerEntries
-            .Where(entry => entry.AccountId == accountId)
-            .ToListAsync(cancellationToken);
-
-        var currentBalance = new CreditLedgerService(accountEntries).GetBalance(accountId);
+        var currentBalance = await CreditLedgerService.GetBalanceAsync(_dbContext.CreditLedgerEntries, accountId, cancellationToken);
         if (creditCost > currentBalance)
         {
             throw new InsufficientCreditsException(accountId, currentBalance, creditCost);
@@ -118,7 +115,11 @@ public class UsageService
     private async Task<UsageEventRecordResult?> TryGetExistingResultAsync(Guid accountId, string idempotencyKey, CancellationToken cancellationToken)
     {
         var existingLedgerEntry = await _dbContext.CreditLedgerEntries
-            .Where(entry => entry.AccountId == accountId && entry.IdempotencyKey == idempotencyKey)
+            .Where(entry =>
+                entry.AccountId == accountId &&
+                entry.IdempotencyKey == idempotencyKey &&
+                entry.Source == CreditLedgerEntrySource.UsageEvent &&
+                entry.Type == CreditLedgerEntryType.Consume)
             .SingleOrDefaultAsync(cancellationToken);
 
         if (existingLedgerEntry is null)
@@ -130,12 +131,18 @@ public class UsageService
             .Where(usageEvent => usageEvent.AccountId == accountId && usageEvent.IdempotencyKey == idempotencyKey)
             .SingleOrDefaultAsync(cancellationToken);
 
-        var resultingBalance = await _dbContext.CreditLedgerEntries
-            .Where(entry => entry.AccountId == accountId)
-            .SumAsync(entry => (int?)entry.Amount, cancellationToken) ?? 0;
+        var resultingBalance = await CreditLedgerService.GetBalanceAsync(_dbContext.CreditLedgerEntries, accountId, cancellationToken);
+
+        var usageEventId = existingUsageEvent?.Id;
+        var parsedUsageEventId = Guid.Empty;
+        if (usageEventId is null && !Guid.TryParse(existingLedgerEntry.ReferenceId, out parsedUsageEventId))
+        {
+            throw new InvalidOperationException(
+                $"Usage ledger entry '{existingLedgerEntry.Id}' has an invalid reference id '{existingLedgerEntry.ReferenceId}'.");
+        }
 
         return new UsageEventRecordResult(
-            existingUsageEvent?.Id ?? Guid.Parse(existingLedgerEntry.ReferenceId),
+            usageEventId ?? parsedUsageEventId,
             accountId,
             existingUsageEvent?.EventType ?? "usage-event",
             existingUsageEvent?.CreditCost ?? Math.Abs(existingLedgerEntry.Amount),
