@@ -1,5 +1,6 @@
 using CreditFlow.Application;
 using CreditFlow.Components;
+using CreditFlow.Components.Services;
 using CreditFlow.Contracts;
 using CreditFlow.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddScoped<AccountQueryService>();
 builder.Services.AddScoped<UsageService>();
+builder.Services.AddHttpClient<DashboardApiClient>();
 
 var app = builder.Build();
 
