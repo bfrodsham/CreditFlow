@@ -48,6 +48,17 @@ public class DashboardApiClient
         return await response.Content.ReadFromJsonAsync<UsageEventResultDto>(cancellationToken: cancellationToken);
     }
 
+    public async Task<PaymentWebhookResultDto?> SimulatePaymentWebhookAsync(Guid accountId, int? credits, string? idempotencyKey, string? description, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsJsonAsync(
+            BuildUri("/api/simulate/payment-webhook"),
+            new SimulatePaymentWebhookRequestDto(accountId, credits, idempotencyKey, description),
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<PaymentWebhookResultDto>(cancellationToken: cancellationToken);
+    }
+
     private Uri BuildUri(string relativePath)
     {
         return _navigation.ToAbsoluteUri(relativePath);

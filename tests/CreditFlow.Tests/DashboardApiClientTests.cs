@@ -73,6 +73,36 @@ public class DashboardApiClientTests
         Assert.Equal(expected.Balance, result.Balance);
     }
 
+    [Fact]
+    public async Task SimulatePaymentWebhookAsync_PostsExpectedPayload()
+    {
+        var accountId = Guid.NewGuid();
+        var expected = new PaymentWebhookResultDto(accountId, 120, "payment-abc", "payment-ref-123", 240, false);
+
+        var sut = BuildClient(async request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/api/simulate/payment-webhook", request.RequestUri?.AbsolutePath);
+
+            var payload = await request.Content!.ReadFromJsonAsync<SimulatePaymentWebhookRequestDto>();
+            Assert.NotNull(payload);
+            Assert.Equal(accountId, payload.AccountId);
+            Assert.Equal(120, payload.Credits);
+            Assert.Equal("payment-abc", payload.IdempotencyKey);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(expected)
+            };
+        });
+
+        var result = await sut.SimulatePaymentWebhookAsync(accountId, 120, "payment-abc", "demo grant");
+
+        Assert.NotNull(result);
+        Assert.Equal(expected.CreditsGranted, result.CreditsGranted);
+        Assert.Equal(expected.Balance, result.Balance);
+    }
+
     private static DashboardApiClient BuildClient(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
     {
         var navigation = new TestNavigationManager();
