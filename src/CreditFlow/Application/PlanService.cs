@@ -147,11 +147,22 @@ public class PlanService
 			.Where(plan => planIds.Contains(plan.Id))
 			.ToDictionaryAsync(plan => plan.Id, cancellationToken);
 
+		var processedCount = 0;
+		var pendingGrantKeys = new List<(Guid AccountId, string Key)>();
 		foreach (var subscription in dueSubscriptions)
 		{
 			if (!plansById.TryGetValue(subscription.PlanId, out var plan))
 			{
 				throw new InvalidOperationException($"Plan '{subscription.PlanId}' was not found for subscription '{subscription.Id}'.");
+			}
+
+			var grantKey = BuildRenewalIdempotencyKey("grant", subscription.AccountId, subscription.CurrentPeriodEnd);
+			var alreadyRenewed = await _dbContext.CreditLedgerEntries
+				.AnyAsync(entry => entry.AccountId == subscription.AccountId && entry.IdempotencyKey == grantKey, cancellationToken);
+
+			if (alreadyRenewed)
+			{
+				continue;
 			}
 
 			var currentBalance = await CreditLedgerService.GetBalanceAsync(
@@ -182,7 +193,7 @@ public class PlanService
 				Amount = plan.MonthlyCreditAllowance,
 				Type = CreditLedgerEntryType.Grant,
 				Source = CreditLedgerEntrySource.SubscriptionRenewal,
-				IdempotencyKey = BuildRenewalIdempotencyKey("grant", subscription.AccountId, subscription.CurrentPeriodEnd),
+				IdempotencyKey = grantKey,
 				ReferenceId = subscription.Id.ToString(),
 				Description = $"{plan.Name} renewal allowance",
 				CreatedAt = asOf
@@ -191,12 +202,40 @@ public class PlanService
 			subscription.CurrentPeriodStart = subscription.CurrentPeriodEnd;
 			subscription.CurrentPeriodEnd = subscription.CurrentPeriodEnd.AddMonths(1);
 			subscription.UpdatedAt = asOf;
+			pendingGrantKeys.Add((subscription.AccountId, grantKey));
+			processedCount++;
 		}
 
-		await _dbContext.SaveChangesAsync(cancellationToken);
-		await transaction.CommitAsync(cancellationToken);
+		try
+		{
+			await _dbContext.SaveChangesAsync(cancellationToken);
+			await transaction.CommitAsync(cancellationToken);
+		}
+		catch (DbUpdateException)
+		{
+			await transaction.RollbackAsync(cancellationToken);
 
-		return dueSubscriptions.Count;
+			var anyUnprocessed = false;
+			foreach (var (accountId, key) in pendingGrantKeys)
+			{
+				var exists = await _dbContext.CreditLedgerEntries
+					.AnyAsync(entry => entry.AccountId == accountId && entry.IdempotencyKey == key, cancellationToken);
+				if (!exists)
+				{
+					anyUnprocessed = true;
+					break;
+				}
+			}
+
+			if (anyUnprocessed)
+			{
+				throw;
+			}
+
+			return 0;
+		}
+
+		return processedCount;
 	}
 
 	private static string BuildRenewalIdempotencyKey(string action, Guid accountId, DateTimeOffset periodEnd)
