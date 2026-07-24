@@ -48,6 +48,52 @@ else
                 }
             </div>
 
+            <div>
+                <h2 class="h5 mb-1">Current Plan</h2>
+                @if (_isLoadingPlans || _isLoadingSubscription)
+                {
+                    <p class="mb-0">Loading plan details...</p>
+                }
+                else if (_subscription is null)
+                {
+                    <p class="mb-2">No subscription is set for this account.</p>
+                }
+                else
+                {
+                    <p class="mb-1"><strong>@_subscription.PlanName</strong> (@_subscription.MonthlyCreditAllowance credits/month)</p>
+                    <p class="mb-2 text-muted">
+                        Rollover: @(_subscription.AllowsRollover ? "Enabled" : "Disabled")
+                        |
+                        Renews @(_subscription.CurrentPeriodEnd.ToString("yyyy-MM-dd"))
+                    </p>
+                }
+
+                @if (_plans.Count > 0)
+                {
+                    <div class="d-flex flex-wrap gap-2">
+                        @foreach (var plan in _plans)
+                        {
+                            var isCurrent = _subscription?.PlanId == plan.Id;
+                            var isUpdatingThisPlan = _isUpdatingPlan && _pendingPlanId == plan.Id;
+
+                            <button
+                                class="btn @(isCurrent ? "btn-outline-secondary" : "btn-outline-primary")"
+                                disabled="@(_selectedAccountId is null || _isUpdatingPlan || isCurrent)"
+                                @onclick="() => ChangePlanAsync(plan.Id)">
+                                @(isUpdatingThisPlan ? $"Switching to {plan.Name}..." : isCurrent ? $"{plan.Name} (Current)" : $"Switch to {plan.Name}")
+                            </button>
+                        }
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_planMessage))
+                {
+                    <p class="mb-0 mt-2">@_planMessage</p>
+                }
+
+                <p class="mb-0 mt-2 text-muted">Background subscription renewal checks run every 20 seconds.</p>
+            </div>
+
             <div class="d-flex flex-column gap-2 align-items-start">
                 <button class="btn btn-primary" @onclick="SimulateUsageEventAsync" disabled="@(_selectedAccountId is null || _isSimulatingUsage)">
                     @(_isSimulatingUsage ? "Simulating usage..." : "Simulate Usage Event")
@@ -69,32 +115,59 @@ else
                     <p class="mb-0">@_webhookMessage</p>
                 }
             </div>
+
+            <div class="d-flex flex-column gap-2 align-items-start">
+                <button class="btn btn-success" @onclick="ApplyRenewalNowForSelectedAccountAsync" disabled="@(_selectedAccountId is null || _isApplyingSelectedRenewal)">
+                    @(_isApplyingSelectedRenewal ? "Applying renewal now..." : "Apply Renewal Now (Selected Account)")
+                </button>
+
+                <button class="btn btn-outline-success" @onclick="QueueRenewalForAllAccountsAsync" disabled="@_isQueueingAllRenewals">
+                    @(_isQueueingAllRenewals ? "Queueing renewals..." : "Queue Renewal For All Accounts (Runs On Next Background Check)")
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(_renewalMessage))
+                {
+                    <p class="mb-0">@_renewalMessage</p>
+                }
+            </div>
         </div>
     </div>
 }
 
 @code {
     private List<AccountSummaryDto> _accounts = [];
+    private List<PlanDto> _plans = [];
     private Guid? _selectedAccountId;
+    private Guid? _pendingPlanId;
     private int? _balance;
+    private SubscriptionDto? _subscription;
     private bool _isLoading = true;
     private bool _isLoadingBalance;
+    private bool _isLoadingPlans;
+    private bool _isLoadingSubscription;
     private bool _isSimulatingUsage;
     private bool _isSubmitting;
+    private bool _isUpdatingPlan;
+    private bool _isApplyingSelectedRenewal;
+    private bool _isQueueingAllRenewals;
     private string? _error;
+    private string? _planMessage;
     private string? _usageMessage;
     private string? _webhookMessage;
+    private string? _renewalMessage;
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
             _accounts = await DashboardApi.GetAccountsAsync();
+            _isLoadingPlans = true;
+            _plans = await DashboardApi.GetPlansAsync();
             _selectedAccountId = _accounts.FirstOrDefault()?.Id;
 
             if (_selectedAccountId is not null)
             {
-                await LoadBalanceAsync(_selectedAccountId.Value);
+                await LoadAccountSnapshotAsync(_selectedAccountId.Value);
             }
         }
         catch
@@ -103,6 +176,7 @@ else
         }
         finally
         {
+            _isLoadingPlans = false;
             _isLoading = false;
         }
     }
@@ -115,9 +189,17 @@ else
         }
 
         _selectedAccountId = accountId;
+        _planMessage = null;
         _usageMessage = null;
         _webhookMessage = null;
+        _renewalMessage = null;
+        await LoadAccountSnapshotAsync(accountId);
+    }
+
+    private async Task LoadAccountSnapshotAsync(Guid accountId)
+    {
         await LoadBalanceAsync(accountId);
+        await LoadSubscriptionAsync(accountId);
     }
 
     private async Task LoadBalanceAsync(Guid accountId)
@@ -138,6 +220,56 @@ else
         finally
         {
             _isLoadingBalance = false;
+        }
+    }
+
+    private async Task LoadSubscriptionAsync(Guid accountId)
+    {
+        _isLoadingSubscription = true;
+        _error = null;
+
+        try
+        {
+            _subscription = await DashboardApi.GetSubscriptionAsync(accountId);
+        }
+        catch
+        {
+            _error = "Unable to load subscription for the selected account.";
+            _subscription = null;
+        }
+        finally
+        {
+            _isLoadingSubscription = false;
+        }
+    }
+
+    private async Task ChangePlanAsync(Guid planId)
+    {
+        if (_selectedAccountId is null)
+        {
+            return;
+        }
+
+        _isUpdatingPlan = true;
+        _pendingPlanId = planId;
+        _error = null;
+        _planMessage = null;
+
+        try
+        {
+            _subscription = await DashboardApi.UpdatePlanAsync(_selectedAccountId.Value, planId);
+            _planMessage = _subscription is null
+                ? "Plan updated."
+                : $"Plan updated to {_subscription.PlanName}.";
+        }
+        catch
+        {
+            _error = "Unable to update plan for the selected account.";
+        }
+        finally
+        {
+            _isUpdatingPlan = false;
+            _pendingPlanId = null;
         }
     }
 
@@ -170,6 +302,66 @@ else
         finally
         {
             _isSubmitting = false;
+        }
+    }
+
+    private async Task ApplyRenewalNowForSelectedAccountAsync()
+    {
+        if (_selectedAccountId is null)
+        {
+            return;
+        }
+
+        _isApplyingSelectedRenewal = true;
+        _error = null;
+        _renewalMessage = null;
+
+        try
+        {
+            var result = await DashboardApi.RenewSelectedAccountNowAsync(_selectedAccountId.Value);
+            _renewalMessage = result is null
+                ? "Renewal was requested for the selected account."
+                : result.RenewalsProcessed > 0
+                    ? "Renewal applied immediately for the selected account."
+                    : "No renewal was due for the selected account.";
+
+            await LoadAccountSnapshotAsync(_selectedAccountId.Value);
+        }
+        catch
+        {
+            _error = "Unable to apply renewal for the selected account.";
+        }
+        finally
+        {
+            _isApplyingSelectedRenewal = false;
+        }
+    }
+
+    private async Task QueueRenewalForAllAccountsAsync()
+    {
+        _isQueueingAllRenewals = true;
+        _error = null;
+        _renewalMessage = null;
+
+        try
+        {
+            var result = await DashboardApi.QueueRenewalForAllAccountsAsync();
+            _renewalMessage = result is null
+                ? "Renewal was queued for all accounts."
+                : $"Queued renewal for {result.AccountsQueued} account(s). The background job will apply these on its next check.";
+
+            if (_selectedAccountId is not null)
+            {
+                await LoadSubscriptionAsync(_selectedAccountId.Value);
+            }
+        }
+        catch
+        {
+            _error = "Unable to queue renewals for all accounts.";
+        }
+        finally
+        {
+            _isQueueingAllRenewals = false;
         }
     }
 

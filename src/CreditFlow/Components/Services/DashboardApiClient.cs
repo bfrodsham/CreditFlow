@@ -37,6 +37,60 @@ public class DashboardApiClient
         return await response.Content.ReadFromJsonAsync<AccountBalanceDto>(cancellationToken: cancellationToken);
     }
 
+    public async Task<List<PlanDto>> GetPlansAsync(CancellationToken cancellationToken = default)
+    {
+        var plans = await _httpClient.GetFromJsonAsync<List<PlanDto>>(
+            BuildUri("/api/plans"),
+            cancellationToken);
+
+        return plans ?? [];
+    }
+
+    public async Task<SubscriptionDto?> GetSubscriptionAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync(BuildUri($"/api/accounts/{accountId}/subscription"), cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<SubscriptionDto>(cancellationToken: cancellationToken);
+    }
+
+    public async Task<SubscriptionDto?> UpdatePlanAsync(Guid accountId, Guid planId, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsJsonAsync(
+            BuildUri($"/api/accounts/{accountId}/plan"),
+            new UpdateAccountPlanRequestDto(planId),
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<SubscriptionDto>(cancellationToken: cancellationToken);
+    }
+
+    public async Task<RenewalActionResultDto?> QueueRenewalForAllAccountsAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsync(
+            BuildUri("/api/simulate/renewals/queue-all"),
+            content: null,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<RenewalActionResultDto>(cancellationToken: cancellationToken);
+    }
+
+    public async Task<RenewalActionResultDto?> RenewSelectedAccountNowAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsync(
+            BuildUri($"/api/simulate/accounts/{accountId}/renew-now"),
+            content: null,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<RenewalActionResultDto>(cancellationToken: cancellationToken);
+    }
+
     public async Task<UsageEventResultDto?> SimulateUsageEventAsync(Guid accountId, string eventType, string? idempotencyKey, CancellationToken cancellationToken = default)
     {
         var response = await _httpClient.PostAsJsonAsync(

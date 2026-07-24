@@ -15,6 +15,7 @@ var connectionString = builder.Configuration.GetConnectionString("CreditFlowDb")
 builder.Services.AddDbContext<CreditFlowDbContext>(options =>
     options.UseSqlite(connectionString));
 builder.Services.Configure<BillingWebhookOptions>(builder.Configuration.GetSection(BillingWebhookOptions.SectionName));
+builder.Services.Configure<PlanRenewalOptions>(builder.Configuration.GetSection(PlanRenewalOptions.SectionName));
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -22,6 +23,8 @@ builder.Services.AddRazorComponents()
 builder.Services.AddScoped<AccountQueryService>();
 builder.Services.AddScoped<UsageService>();
 builder.Services.AddScoped<BillingWebhookService>();
+builder.Services.AddScoped<PlanService>();
+builder.Services.AddHostedService<PlanRenewalJob>();
 builder.Services.AddHttpClient<DashboardApiClient>();
 
 var app = builder.Build();
@@ -63,6 +66,70 @@ app.MapGet("/api/accounts/{id:guid}/balance", async (Guid id, AccountQueryServic
     }
 
     return Results.Ok(balance);
+});
+
+app.MapGet("/api/plans", async (PlanService planService, CancellationToken cancellationToken) =>
+{
+    return Results.Ok(await planService.GetPlansAsync(cancellationToken));
+});
+
+app.MapGet("/api/accounts/{id:guid}/subscription", async (Guid id, PlanService planService, CancellationToken cancellationToken) =>
+{
+    var subscription = await planService.GetSubscriptionAsync(id, cancellationToken);
+    if (subscription is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(subscription);
+});
+
+app.MapPost("/api/accounts/{id:guid}/plan", async (Guid id, UpdateAccountPlanRequestDto request, PlanService planService, CancellationToken cancellationToken) =>
+{
+    if (request.PlanId == Guid.Empty)
+    {
+        return Results.BadRequest(new { error = "PlanId is required." });
+    }
+
+    try
+    {
+        var subscription = await planService.ChangePlanAsync(id, request.PlanId, cancellationToken);
+        return Results.Ok(subscription);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/simulate/renewals/queue-all", async (PlanService planService, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("SimulateRenewalQueueAll");
+    var requestedAt = DateTimeOffset.UtcNow;
+
+    var queuedCount = await planService.QueueRenewalForAllAccountsAsync(requestedAt, cancellationToken);
+    logger.LogInformation("Queued renewal for {QueuedCount} active subscriptions at {RequestedAt}.", queuedCount, requestedAt);
+
+    return Results.Ok(new RenewalActionResultDto(queuedCount, 0, requestedAt));
+});
+
+app.MapPost("/api/simulate/accounts/{id:guid}/renew-now", async (Guid id, PlanService planService, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("SimulateRenewalForAccount");
+    var requestedAt = DateTimeOffset.UtcNow;
+
+    try
+    {
+        var processedCount = await planService.TriggerImmediateRenewalForAccountAsync(id, requestedAt, cancellationToken);
+        logger.LogInformation("Applied immediate renewal for account {AccountId}; processed {ProcessedCount} renewal(s).", id, processedCount);
+
+        return Results.Ok(new RenewalActionResultDto(1, processedCount, requestedAt));
+    }
+    catch (InvalidOperationException ex)
+    {
+        logger.LogWarning(ex, "Immediate renewal failed for account {AccountId}.", id);
+        return Results.NotFound(new { error = ex.Message });
+    }
 });
 
 app.MapPost("/api/accounts/{id:guid}/usage-events", async (Guid id, UsageEventRequestDto request, UsageService usageService, CancellationToken cancellationToken) =>
