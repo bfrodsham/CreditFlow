@@ -1,4 +1,5 @@
 using CreditFlow.Domain;
+using Microsoft.EntityFrameworkCore;
 
 namespace CreditFlow.Infrastructure;
 
@@ -10,6 +11,12 @@ public static class CreditFlowSeedData
     public static readonly Guid FreePlanId = Guid.Parse("44444444-4444-4444-4444-444444444441");
     public static readonly Guid ProPlanId = Guid.Parse("44444444-4444-4444-4444-444444444442");
     public static readonly Guid EnterprisePlanId = Guid.Parse("44444444-4444-4444-4444-444444444443");
+    public static readonly Guid AccountASubscriptionId = Guid.Parse("55555555-5555-5555-5555-555555555551");
+    public static readonly Guid AccountBSubscriptionId = Guid.Parse("55555555-5555-5555-5555-555555555552");
+    public static readonly Guid AccountCSubscriptionId = Guid.Parse("55555555-5555-5555-5555-555555555553");
+
+    private static readonly DateTimeOffset LegacySeedPeriodStart = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset LegacySeedPeriodEnd = new(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
 
     public static IEnumerable<Account> Accounts()
     {
@@ -156,15 +163,16 @@ public static class CreditFlowSeedData
 
     public static IEnumerable<Subscription> Subscriptions()
     {
-        var periodStart = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
-        var periodEnd = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
-        var createdAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+        var now = DateTimeOffset.UtcNow;
+        var periodStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = periodStart.AddMonths(1);
+        var createdAt = periodStart;
 
         return
         [
             new Subscription
             {
-                Id = Guid.Parse("55555555-5555-5555-5555-555555555551"),
+                Id = AccountASubscriptionId,
                 AccountId = AccountAId,
                 PlanId = FreePlanId,
                 CurrentPeriodStart = periodStart,
@@ -175,7 +183,7 @@ public static class CreditFlowSeedData
             },
             new Subscription
             {
-                Id = Guid.Parse("55555555-5555-5555-5555-555555555552"),
+                Id = AccountBSubscriptionId,
                 AccountId = AccountBId,
                 PlanId = ProPlanId,
                 CurrentPeriodStart = periodStart,
@@ -186,7 +194,7 @@ public static class CreditFlowSeedData
             },
             new Subscription
             {
-                Id = Guid.Parse("55555555-5555-5555-5555-555555555553"),
+                Id = AccountCSubscriptionId,
                 AccountId = AccountCId,
                 PlanId = EnterprisePlanId,
                 CurrentPeriodStart = periodStart,
@@ -196,5 +204,45 @@ public static class CreditFlowSeedData
                 UpdatedAt = createdAt
             }
         ];
+    }
+
+    public static async Task AlignSeedSubscriptionsToCurrentMonthAsync(CreditFlowDbContext dbContext, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var periodStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = periodStart.AddMonths(1);
+
+        var seedSubscriptionIds = new[]
+        {
+            AccountASubscriptionId,
+            AccountBSubscriptionId,
+            AccountCSubscriptionId
+        };
+
+        var subscriptions = await dbContext.Subscriptions
+            .Where(subscription => seedSubscriptionIds.Contains(subscription.Id))
+            .ToListAsync(cancellationToken);
+
+        var hasChanges = false;
+        foreach (var subscription in subscriptions)
+        {
+            var isLegacySeedWindow = subscription.CurrentPeriodStart == LegacySeedPeriodStart
+                && subscription.CurrentPeriodEnd == LegacySeedPeriodEnd;
+
+            if (!isLegacySeedWindow)
+            {
+                continue;
+            }
+
+            subscription.CurrentPeriodStart = periodStart;
+            subscription.CurrentPeriodEnd = periodEnd;
+            subscription.UpdatedAt = now;
+            hasChanges = true;
+        }
+
+        if (hasChanges)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 }

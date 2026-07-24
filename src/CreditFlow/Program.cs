@@ -102,6 +102,36 @@ app.MapPost("/api/accounts/{id:guid}/plan", async (Guid id, UpdateAccountPlanReq
     }
 });
 
+app.MapPost("/api/simulate/renewals/queue-all", async (PlanService planService, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("SimulateRenewalQueueAll");
+    var requestedAt = DateTimeOffset.UtcNow;
+
+    var queuedCount = await planService.QueueRenewalForAllAccountsAsync(requestedAt, cancellationToken);
+    logger.LogInformation("Queued renewal for {QueuedCount} active subscriptions at {RequestedAt}.", queuedCount, requestedAt);
+
+    return Results.Ok(new RenewalActionResultDto(queuedCount, 0, requestedAt));
+});
+
+app.MapPost("/api/simulate/accounts/{id:guid}/renew-now", async (Guid id, PlanService planService, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("SimulateRenewalForAccount");
+    var requestedAt = DateTimeOffset.UtcNow;
+
+    try
+    {
+        var processedCount = await planService.TriggerImmediateRenewalForAccountAsync(id, requestedAt, cancellationToken);
+        logger.LogInformation("Applied immediate renewal for account {AccountId}; processed {ProcessedCount} renewal(s).", id, processedCount);
+
+        return Results.Ok(new RenewalActionResultDto(1, processedCount, requestedAt));
+    }
+    catch (InvalidOperationException ex)
+    {
+        logger.LogWarning(ex, "Immediate renewal failed for account {AccountId}.", id);
+        return Results.NotFound(new { error = ex.Message });
+    }
+});
+
 app.MapPost("/api/accounts/{id:guid}/usage-events", async (Guid id, UsageEventRequestDto request, UsageService usageService, CancellationToken cancellationToken) =>
 {
     try
