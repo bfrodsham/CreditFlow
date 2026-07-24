@@ -69,6 +69,28 @@ public class DashboardApiClient
         return await response.Content.ReadFromJsonAsync<SubscriptionDto>(cancellationToken: cancellationToken);
     }
 
+    public async Task<RenewalActionResultDto?> QueueRenewalForAllAccountsAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsync(
+            BuildUri("/api/simulate/renewals/queue-all"),
+            content: null,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<RenewalActionResultDto>(cancellationToken: cancellationToken);
+    }
+
+    public async Task<RenewalActionResultDto?> RenewSelectedAccountNowAsync(Guid accountId, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.PostAsync(
+            BuildUri($"/api/simulate/accounts/{accountId}/renew-now"),
+            content: null,
+            cancellationToken);
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<RenewalActionResultDto>(cancellationToken: cancellationToken);
+    }
+
     public async Task<UsageEventResultDto?> SimulateUsageEventAsync(Guid accountId, string eventType, string? idempotencyKey, CancellationToken cancellationToken = default)
     {
         var response = await _httpClient.PostAsJsonAsync(
