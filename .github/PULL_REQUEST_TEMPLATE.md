@@ -10,5 +10,5 @@
 # What's Next?
 
 
-# Agentic Mode Prompt Used
+# Initial Agent Mode Prompt Used
 
