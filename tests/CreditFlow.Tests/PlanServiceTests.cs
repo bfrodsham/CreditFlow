@@ -105,6 +105,34 @@ public class PlanServiceTests
     }
 
     [Fact]
+    public async Task TriggerImmediateRenewalForAccountAsync_ProcessesSelectedAccountRenewal()
+    {
+        await using var testContext = await CreateTestContextAsync();
+        var accountId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
+        var asOf = new DateTimeOffset(2026, 7, 25, 0, 0, 0, TimeSpan.Zero);
+
+        testContext.DbContext.Accounts.Add(BuildAccount(accountId, "fabrikam@example.com"));
+        testContext.DbContext.Plans.Add(BuildPlan(planId, "Scale Test", 150, allowsRollover: false));
+        testContext.DbContext.Subscriptions.Add(BuildSubscription(accountId, planId, asOf.AddMonths(-1), asOf.AddDays(10)));
+        await testContext.DbContext.SaveChangesAsync();
+
+        var sut = new PlanService(testContext.DbContext);
+
+        var renewedCount = await sut.TriggerImmediateRenewalForAccountAsync(accountId, asOf);
+
+        Assert.Equal(1, renewedCount);
+
+        var updatedSubscription = await testContext.DbContext.Subscriptions.SingleAsync(item => item.AccountId == accountId);
+        Assert.Equal(asOf, updatedSubscription.CurrentPeriodStart);
+        Assert.Equal(asOf.AddMonths(1), updatedSubscription.CurrentPeriodEnd);
+
+        var renewalGrant = await testContext.DbContext.CreditLedgerEntries
+            .SingleAsync(entry => entry.AccountId == accountId && entry.Type == CreditLedgerEntryType.Grant && entry.IdempotencyKey.StartsWith("renewal-grant-"));
+        Assert.Equal(150, renewalGrant.Amount);
+    }
+
+    [Fact]
     public async Task ChangePlanAsync_UpdatesSubscriptionWithoutChangingLedgerHistory()
     {
         await using var testContext = await CreateTestContextAsync();
