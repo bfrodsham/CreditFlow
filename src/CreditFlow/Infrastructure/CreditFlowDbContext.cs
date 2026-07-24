@@ -11,6 +11,8 @@ public class CreditFlowDbContext : DbContext
     }
 
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<Plan> Plans => Set<Plan>();
+    public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<CreditLedgerEntry> CreditLedgerEntries => Set<CreditLedgerEntry>();
     public DbSet<UsageEvent> UsageEvents => Set<UsageEvent>();
 
@@ -27,6 +29,47 @@ public class CreditFlowDbContext : DbContext
             entity.HasIndex(account => account.Email).IsUnique();
 
             entity.HasData(CreditFlowSeedData.Accounts());
+        });
+
+        modelBuilder.Entity<Plan>(entity =>
+        {
+            entity.ToTable("Plans");
+            entity.HasKey(plan => plan.Id);
+            entity.Property(plan => plan.Name).IsRequired().HasMaxLength(100);
+            entity.Property(plan => plan.MonthlyCreditAllowance).IsRequired();
+            entity.Property(plan => plan.AllowsRollover).IsRequired();
+            entity.Property(plan => plan.PricePerExtraCredit).IsRequired().HasPrecision(10, 2);
+            entity.Property(plan => plan.CreatedAt).IsRequired();
+
+            entity.HasIndex(plan => plan.Name).IsUnique();
+
+            entity.HasData(CreditFlowSeedData.Plans());
+        });
+
+        modelBuilder.Entity<Subscription>(entity =>
+        {
+            entity.ToTable("Subscriptions");
+            entity.HasKey(subscription => subscription.Id);
+            entity.Property(subscription => subscription.CurrentPeriodStart).IsRequired();
+            entity.Property(subscription => subscription.CurrentPeriodEnd).IsRequired();
+            entity.Property(subscription => subscription.Status).IsRequired().HasMaxLength(50);
+            entity.Property(subscription => subscription.CreatedAt).IsRequired();
+            entity.Property(subscription => subscription.UpdatedAt).IsRequired();
+
+            entity.HasIndex(subscription => subscription.AccountId).IsUnique();
+            entity.HasIndex(subscription => subscription.PlanId);
+
+            entity.HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(subscription => subscription.AccountId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne<Plan>()
+                .WithMany()
+                .HasForeignKey(subscription => subscription.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasData(CreditFlowSeedData.Subscriptions());
         });
 
         modelBuilder.Entity<CreditLedgerEntry>(entity =>
