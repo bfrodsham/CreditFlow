@@ -125,6 +125,10 @@ app.MapPost("/api/webhooks/billing", async (HttpRequest request, BillingWebhookS
     {
         return Results.BadRequest(new { error = ex.Message });
     }
+    catch (InvalidOperationException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
 });
 
 if (app.Environment.IsDevelopment())
@@ -195,6 +199,10 @@ if (app.Environment.IsDevelopment())
         catch (ArgumentException ex)
         {
             return Results.BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
         }
     });
 }

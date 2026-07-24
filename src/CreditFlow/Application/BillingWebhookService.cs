@@ -189,25 +189,42 @@ public class BillingWebhookService
             throw new MalformedWebhookPayloadException("Payload credits must be greater than zero.");
         }
 
-        if (string.IsNullOrWhiteSpace(deserialized.IdempotencyKey))
+        var idempotencyKey = deserialized.IdempotencyKey?.Trim();
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
         {
             throw new MalformedWebhookPayloadException("Payload idempotencyKey is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(deserialized.ReferenceId))
+        if (idempotencyKey.Length > 200)
+        {
+            throw new MalformedWebhookPayloadException("Payload idempotencyKey must be 200 characters or fewer.");
+        }
+
+        var referenceId = deserialized.ReferenceId?.Trim();
+        if (string.IsNullOrWhiteSpace(referenceId))
         {
             throw new MalformedWebhookPayloadException("Payload referenceId is required.");
+        }
+
+        if (referenceId.Length > 200)
+        {
+            throw new MalformedWebhookPayloadException("Payload referenceId must be 200 characters or fewer.");
         }
 
         var description = string.IsNullOrWhiteSpace(deserialized.Description)
             ? "Billing webhook credit grant"
             : deserialized.Description.Trim();
 
+        if (description.Length > 500)
+        {
+            throw new MalformedWebhookPayloadException("Payload description must be 500 characters or fewer.");
+        }
+
         return new PaymentWebhookPayload(
             deserialized.AccountId,
             deserialized.Credits,
-            deserialized.IdempotencyKey.Trim(),
-            deserialized.ReferenceId.Trim(),
+            idempotencyKey,
+            referenceId,
             description);
     }
 
