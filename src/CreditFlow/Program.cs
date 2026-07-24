@@ -15,6 +15,7 @@ var connectionString = builder.Configuration.GetConnectionString("CreditFlowDb")
 builder.Services.AddDbContext<CreditFlowDbContext>(options =>
     options.UseSqlite(connectionString));
 builder.Services.Configure<BillingWebhookOptions>(builder.Configuration.GetSection(BillingWebhookOptions.SectionName));
+builder.Services.Configure<PlanRenewalOptions>(builder.Configuration.GetSection(PlanRenewalOptions.SectionName));
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -22,6 +23,8 @@ builder.Services.AddRazorComponents()
 builder.Services.AddScoped<AccountQueryService>();
 builder.Services.AddScoped<UsageService>();
 builder.Services.AddScoped<BillingWebhookService>();
+builder.Services.AddScoped<PlanService>();
+builder.Services.AddHostedService<PlanRenewalJob>();
 builder.Services.AddHttpClient<DashboardApiClient>();
 
 var app = builder.Build();
@@ -63,6 +66,40 @@ app.MapGet("/api/accounts/{id:guid}/balance", async (Guid id, AccountQueryServic
     }
 
     return Results.Ok(balance);
+});
+
+app.MapGet("/api/plans", async (PlanService planService, CancellationToken cancellationToken) =>
+{
+    return Results.Ok(await planService.GetPlansAsync(cancellationToken));
+});
+
+app.MapGet("/api/accounts/{id:guid}/subscription", async (Guid id, PlanService planService, CancellationToken cancellationToken) =>
+{
+    var subscription = await planService.GetSubscriptionAsync(id, cancellationToken);
+    if (subscription is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(subscription);
+});
+
+app.MapPost("/api/accounts/{id:guid}/plan", async (Guid id, UpdateAccountPlanRequestDto request, PlanService planService, CancellationToken cancellationToken) =>
+{
+    if (request.PlanId == Guid.Empty)
+    {
+        return Results.BadRequest(new { error = "PlanId is required." });
+    }
+
+    try
+    {
+        var subscription = await planService.ChangePlanAsync(id, request.PlanId, cancellationToken);
+        return Results.Ok(subscription);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
 });
 
 app.MapPost("/api/accounts/{id:guid}/usage-events", async (Guid id, UsageEventRequestDto request, UsageService usageService, CancellationToken cancellationToken) =>
