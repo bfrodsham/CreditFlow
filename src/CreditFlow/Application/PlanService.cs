@@ -107,11 +107,11 @@ public class PlanService
 
 	public async Task<int> ProcessDueRenewalsForAccountAsync(Guid accountId, DateTimeOffset asOf, CancellationToken cancellationToken = default)
 	{
-		var dueSubscriptions = (await _dbContext.Subscriptions
-				.Where(subscription => subscription.Status == "Active" && subscription.AccountId == accountId)
-				.ToListAsync(cancellationToken))
-			.Where(subscription => subscription.CurrentPeriodEnd <= asOf)
-			.ToList();
+		var dueSubscriptions = await _dbContext.Subscriptions
+			.Where(subscription => subscription.Status == "Active"
+				&& subscription.AccountId == accountId
+				&& subscription.CurrentPeriodEnd <= asOf)
+			.ToListAsync(cancellationToken);
 
 		if (dueSubscriptions.Count == 0)
 		{
@@ -141,11 +141,11 @@ public class PlanService
 	private async Task<int> ProcessRenewalsAsync(List<Subscription> dueSubscriptions, DateTimeOffset asOf, CancellationToken cancellationToken)
 	{
 		var planIds = dueSubscriptions.Select(subscription => subscription.PlanId).Distinct().ToList();
+		await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
 		var plansById = await _dbContext.Plans
 			.Where(plan => planIds.Contains(plan.Id))
 			.ToDictionaryAsync(plan => plan.Id, cancellationToken);
-
-		await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
 		foreach (var subscription in dueSubscriptions)
 		{
