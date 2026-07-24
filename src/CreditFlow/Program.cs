@@ -131,81 +131,94 @@ app.MapPost("/api/webhooks/billing", async (HttpRequest request, BillingWebhookS
     }
 });
 
-if (app.Environment.IsDevelopment())
+app.MapPost("/api/simulate/usage-event", async (SimulateUsageEventRequestDto request, UsageService usageService, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
 {
-    app.MapPost("/api/simulate/usage-event", async (SimulateUsageEventRequestDto request, UsageService usageService, CancellationToken cancellationToken) =>
+    var logger = loggerFactory.CreateLogger("SimulateUsageEvent");
+    var idempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+        ? $"simulate-usage-{Guid.NewGuid():N}"
+        : request.IdempotencyKey;
+
+    logger.LogInformation("Simulating usage event for account {AccountId} with event type {EventType}.", request.AccountId, request.EventType);
+
+    try
     {
-        var idempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
-            ? $"simulate-usage-{Guid.NewGuid():N}"
-            : request.IdempotencyKey;
+        var result = await usageService.RecordUsageEvent(request.AccountId, request.EventType, idempotencyKey, cancellationToken);
+        logger.LogInformation("Simulated usage event succeeded for account {AccountId}; balance is now {Balance}.", result.AccountId, result.Balance);
 
-        try
-        {
-            var result = await usageService.RecordUsageEvent(request.AccountId, request.EventType, idempotencyKey, cancellationToken);
-            return Results.Ok(new UsageEventResultDto(
-                result.UsageEventId,
-                result.AccountId,
-                result.EventType,
-                result.CreditCost,
-                result.IdempotencyKey,
-                result.Balance));
-        }
-        catch (InsufficientCreditsException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message, availableCredits = ex.AvailableCredits, requiredCredits = ex.RequiredCredits });
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
-    });
-
-    app.MapPost("/api/simulate/payment-webhook", async (SimulatePaymentWebhookRequestDto request, BillingWebhookService billingWebhookService, IOptions<BillingWebhookOptions> options, CancellationToken cancellationToken) =>
+        return Results.Ok(new UsageEventResultDto(
+            result.UsageEventId,
+            result.AccountId,
+            result.EventType,
+            result.CreditCost,
+            result.IdempotencyKey,
+            result.Balance));
+    }
+    catch (InsufficientCreditsException ex)
     {
-        if (request.AccountId == Guid.Empty)
-        {
-            return Results.BadRequest(new { error = "AccountId is required." });
-        }
+        logger.LogWarning(ex, "Simulated usage event rejected for account {AccountId} because credits were insufficient.", request.AccountId);
+        return Results.BadRequest(new { error = ex.Message, availableCredits = ex.AvailableCredits, requiredCredits = ex.RequiredCredits });
+    }
+    catch (ArgumentException ex)
+    {
+        logger.LogWarning(ex, "Simulated usage event rejected for account {AccountId} because the request was invalid.", request.AccountId);
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
 
-        var idempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
-            ? $"simulate-payment-{Guid.NewGuid():N}"
-            : request.IdempotencyKey;
+app.MapPost("/api/simulate/payment-webhook", async (SimulatePaymentWebhookRequestDto request, BillingWebhookService billingWebhookService, IOptions<BillingWebhookOptions> options, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("SimulatePaymentWebhook");
 
-        var payloadDto = new PaymentWebhookPayloadDto(
-            request.AccountId,
-            request.Credits.GetValueOrDefault(100),
-            idempotencyKey,
-            $"simulated-payment-{Guid.NewGuid():N}",
-            string.IsNullOrWhiteSpace(request.Description) ? "Simulated payment webhook" : request.Description);
+    if (request.AccountId == Guid.Empty)
+    {
+        logger.LogWarning("Simulated payment webhook rejected because AccountId was empty.");
+        return Results.BadRequest(new { error = "AccountId is required." });
+    }
 
-        var payload = JsonSerializer.Serialize(payloadDto);
+    var idempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+        ? $"simulate-payment-{Guid.NewGuid():N}"
+        : request.IdempotencyKey;
+
+    var payloadDto = new PaymentWebhookPayloadDto(
+        request.AccountId,
+        request.Credits.GetValueOrDefault(100),
+        idempotencyKey,
+        $"simulated-payment-{Guid.NewGuid():N}",
+        string.IsNullOrWhiteSpace(request.Description) ? "Simulated payment webhook" : request.Description);
+
+    var payload = JsonSerializer.Serialize(payloadDto);
+
+    try
+    {
         var signature = BillingWebhookService.CreateSignature(payload, options.Value.SigningSecret);
+        var result = await billingWebhookService.ProcessPaymentEvent(payload, signature, cancellationToken);
 
-        try
-        {
-            var result = await billingWebhookService.ProcessPaymentEvent(payload, signature, cancellationToken);
-            return Results.Ok(new PaymentWebhookResultDto(
-                result.AccountId,
-                result.CreditsGranted,
-                result.IdempotencyKey,
-                result.ReferenceId,
-                result.Balance,
-                result.AlreadyProcessed));
-        }
-        catch (MalformedWebhookPayloadException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
-        catch (ArgumentException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Results.NotFound(new { error = ex.Message });
-        }
-    });
-}
+        logger.LogInformation("Simulated payment webhook succeeded for account {AccountId}; granted {CreditsGranted} credits.", result.AccountId, result.CreditsGranted);
+
+        return Results.Ok(new PaymentWebhookResultDto(
+            result.AccountId,
+            result.CreditsGranted,
+            result.IdempotencyKey,
+            result.ReferenceId,
+            result.Balance,
+            result.AlreadyProcessed));
+    }
+    catch (MalformedWebhookPayloadException ex)
+    {
+        logger.LogWarning(ex, "Simulated payment webhook rejected due to malformed payload for account {AccountId}.", request.AccountId);
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (ArgumentException ex)
+    {
+        logger.LogWarning(ex, "Simulated payment webhook rejected due to invalid input for account {AccountId}.", request.AccountId);
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        logger.LogError(ex, "Simulated payment webhook failed for account {AccountId}.", request.AccountId);
+        return Results.NotFound(new { error = ex.Message });
+    }
+});
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
