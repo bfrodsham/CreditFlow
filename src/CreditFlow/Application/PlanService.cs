@@ -107,11 +107,13 @@ public class PlanService
 
 	public async Task<int> ProcessDueRenewalsForAccountAsync(Guid accountId, DateTimeOffset asOf, CancellationToken cancellationToken = default)
 	{
-		var dueSubscriptions = await _dbContext.Subscriptions
-			.Where(subscription => subscription.Status == "Active"
-				&& subscription.AccountId == accountId
-				&& subscription.CurrentPeriodEnd <= asOf)
-			.ToListAsync(cancellationToken);
+		var dueSubscriptions = (await _dbContext.Subscriptions
+				.Where(subscription => subscription.Status == "Active"
+					&& subscription.AccountId == accountId)
+				.ToListAsync(cancellationToken))
+			.Where(subscription => subscription.CurrentPeriodEnd <= asOf)
+			.OrderBy(subscription => subscription.CurrentPeriodEnd)
+			.ToList();
 
 		if (dueSubscriptions.Count == 0)
 		{
